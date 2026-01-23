@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Config
+clusters:
+  - name: production-cluster
+    cluster:
+      server: https://duplicate-production.k8s.example.com:6443
+      certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCkRVUExJQ0FURSBURVNUIENFSVJUSUZDQVRFIE5PVCBSRUFMIE5PVCBSRUFMCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+contexts:
+  - name: production-context
+    context:
+      cluster: production-cluster
+      user: production-admin
+users:
+  - name: production-admin
+    user:
+      client-certificate-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCkRVUExJQ0FURSBURVNUIENFUlQgREFUQQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+      client-key-data: LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpEVVBMSUNBVEUgVEVTVCBLRVkgREFUQQotLS0tLUVORCBSU0EgUFJJVkFURSBLRVktLS0tLQo=
+current-context: production-context

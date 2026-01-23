@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Config
+clusters:
+  - name: development-cluster
+    cluster:
+      server: https://dev.k8s.example.com:6443
+      insecure-skip-tls-verify: true
+contexts:
+  - name: development-context
+    context:
+      cluster: development-cluster
+      user: development-user
+      namespace: dev
+users:
+  - name: development-user
+    user:
+      token: eyJhbGciOiJSUzI1NiIsImtpZCI6ImRldi10b2tlbiJ9.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJkZXYiLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlY3JldC5uYW1lIjoiZGV2LXRva2VuIn0.fake-signature
+current-context: development-context
