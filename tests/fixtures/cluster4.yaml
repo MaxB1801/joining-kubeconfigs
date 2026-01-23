@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Config
+clusters:
+  - name: testing-cluster
+    cluster:
+      server: https://testing.k8s.example.com:6443
+      certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCnRlc3RpbmctY2VydAotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+contexts:
+  - name: testing-context
+    context:
+      cluster: testing-cluster
+      user: testing-user
+users:
+  - name: testing-user
+    user:
+      token: testing-token-value
+current-context: testing-context

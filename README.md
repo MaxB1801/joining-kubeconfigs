@@ -51,18 +51,33 @@ You can modify this file to change where merged configs are written.
 ## Features
 
 - **Merge multiple kubeconfigs**: Combine any number of kubeconfig files into one
-- **Duplicate detection**: Prevents accidentally adding duplicate clusters, contexts, or users
+- **Smart duplicate handling**: Automatically skips duplicate clusters, contexts, or users and continues processing the rest
 - **Automatic config creation**: Creates the destination config if it doesn't exist
 - **Configurable destination**: Set your preferred output location via `~/.k8sconf/config.yaml`
 
+## Duplicate Handling
+
+When kconf encounters a cluster, context, or user that already exists in the destination config, it will:
+
+1. Skip the duplicate item
+2. Print a message indicating what was skipped
+3. Continue processing the remaining items
+
+Example output:
+```
+Processing: "new-config.yaml"
+  Skipping cluster 'production-cluster' (already exists)
+  Skipping context 'production-context' (already exists)
+  Merged 2 item(s)
+Done: 2 item(s) added, 2 item(s) skipped
+```
+
 ## Error Handling
 
-kconf will error and refuse to merge if:
+kconf will error if:
 
-- A cluster with the same name already exists in the destination
-- A context with the same name already exists in the destination
-- A user with the same name already exists in the destination
-- The source kubeconfig file doesn't exist or is invalid
+- The source kubeconfig file doesn't exist
+- The source kubeconfig file is invalid YAML or not a valid kubeconfig
 
 ## Directory Structure
 

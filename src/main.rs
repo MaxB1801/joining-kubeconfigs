@@ -103,12 +103,6 @@ struct UserInfo {
 
 #[derive(Error, Debug)]
 enum KconfError {
-    #[error("Cluster '{0}' already exists in the destination config")]
-    DuplicateCluster(String),
-    #[error("Context '{0}' already exists in the destination config")]
-    DuplicateContext(String),
-    #[error("User '{0}' already exists in the destination config")]
-    DuplicateUser(String),
     #[error("Kubeconfig file not found: {0}")]
     ConfigNotFound(PathBuf),
 }
@@ -172,40 +166,74 @@ fn create_empty_kubeconfig() -> KubeConfig {
     }
 }
 
-fn check_duplicates(dest: &KubeConfig, source: &KubeConfig) -> Result<()> {
-    // Check for duplicate clusters
-    for source_cluster in &source.clusters {
-        if dest.clusters.iter().any(|c| c.name == source_cluster.name) {
-            return Err(KconfError::DuplicateCluster(source_cluster.name.clone()).into());
-        }
-    }
-
-    // Check for duplicate contexts
-    for source_context in &source.contexts {
-        if dest.contexts.iter().any(|c| c.name == source_context.name) {
-            return Err(KconfError::DuplicateContext(source_context.name.clone()).into());
-        }
-    }
-
-    // Check for duplicate users
-    for source_user in &source.users {
-        if dest.users.iter().any(|u| u.name == source_user.name) {
-            return Err(KconfError::DuplicateUser(source_user.name.clone()).into());
-        }
-    }
-
-    Ok(())
+/// Result of checking for duplicates - contains lists of what can be merged
+struct MergeResult {
+    clusters_to_add: Vec<NamedCluster>,
+    contexts_to_add: Vec<NamedContext>,
+    users_to_add: Vec<NamedUser>,
+    skipped_clusters: Vec<String>,
+    skipped_contexts: Vec<String>,
+    skipped_users: Vec<String>,
 }
 
-fn merge_kubeconfigs(dest: &mut KubeConfig, source: KubeConfig) {
-    dest.clusters.extend(source.clusters);
-    dest.contexts.extend(source.contexts);
-    dest.users.extend(source.users);
+fn filter_duplicates(dest: &KubeConfig, source: KubeConfig) -> MergeResult {
+    let mut result = MergeResult {
+        clusters_to_add: Vec::new(),
+        contexts_to_add: Vec::new(),
+        users_to_add: Vec::new(),
+        skipped_clusters: Vec::new(),
+        skipped_contexts: Vec::new(),
+        skipped_users: Vec::new(),
+    };
+
+    // Filter clusters
+    for cluster in source.clusters {
+        if dest.clusters.iter().any(|c| c.name == cluster.name) {
+            result.skipped_clusters.push(cluster.name.clone());
+        } else {
+            result.clusters_to_add.push(cluster);
+        }
+    }
+
+    // Filter contexts
+    for context in source.contexts {
+        if dest.contexts.iter().any(|c| c.name == context.name) {
+            result.skipped_contexts.push(context.name.clone());
+        } else {
+            result.contexts_to_add.push(context);
+        }
+    }
+
+    // Filter users
+    for user in source.users {
+        if dest.users.iter().any(|u| u.name == user.name) {
+            result.skipped_users.push(user.name.clone());
+        } else {
+            result.users_to_add.push(user);
+        }
+    }
+
+    result
+}
+
+fn merge_kubeconfigs(dest: &mut KubeConfig, merge_result: MergeResult, source_current_context: Option<String>) -> (usize, usize) {
+    let added = merge_result.clusters_to_add.len() 
+        + merge_result.contexts_to_add.len() 
+        + merge_result.users_to_add.len();
+    let skipped = merge_result.skipped_clusters.len() 
+        + merge_result.skipped_contexts.len() 
+        + merge_result.skipped_users.len();
+
+    dest.clusters.extend(merge_result.clusters_to_add);
+    dest.contexts.extend(merge_result.contexts_to_add);
+    dest.users.extend(merge_result.users_to_add);
 
     // Set current-context if destination doesn't have one
-    if dest.current_context.is_none() && source.current_context.is_some() {
-        dest.current_context = source.current_context;
+    if dest.current_context.is_none() && source_current_context.is_some() {
+        dest.current_context = source_current_context;
     }
+
+    (added, skipped)
 }
 
 fn run() -> Result<()> {
@@ -229,19 +257,41 @@ fn run() -> Result<()> {
         create_empty_kubeconfig()
     };
 
+    let mut total_added = 0;
+    let mut total_skipped = 0;
+
     // Process each source kubeconfig
     for config_path in &args.configs {
         println!("Processing: {:?}", config_path);
         
         let source_config = load_kubeconfig(config_path)?;
+        let source_current_context = source_config.current_context.clone();
         
-        // Check for duplicates before merging
-        check_duplicates(&dest_config, &source_config)?;
+        // Filter out duplicates and get what can be merged
+        let merge_result = filter_duplicates(&dest_config, source_config);
+        
+        // Report skipped items
+        for name in &merge_result.skipped_clusters {
+            println!("  Skipping cluster '{}' (already exists)", name);
+        }
+        for name in &merge_result.skipped_contexts {
+            println!("  Skipping context '{}' (already exists)", name);
+        }
+        for name in &merge_result.skipped_users {
+            println!("  Skipping user '{}' (already exists)", name);
+        }
         
         // Merge configs
-        merge_kubeconfigs(&mut dest_config, source_config);
+        let (added, skipped) = merge_kubeconfigs(&mut dest_config, merge_result, source_current_context);
+        total_added += added;
+        total_skipped += skipped;
         
-        println!("  Merged successfully");
+        if added > 0 {
+            println!("  Merged {} item(s)", added);
+        }
+        if skipped > 0 && added == 0 {
+            println!("  Nothing new to merge");
+        }
     }
 
     // Write the merged config
@@ -249,7 +299,7 @@ fn run() -> Result<()> {
     fs::write(&dest_path, &output)
         .with_context(|| format!("Failed to write destination config: {:?}", dest_path))?;
 
-    println!("Successfully merged {} config(s) into {:?}", args.configs.len(), dest_path);
+    println!("Done: {} item(s) added, {} item(s) skipped", total_added, total_skipped);
 
     Ok(())
 }
@@ -308,8 +358,10 @@ mod tests {
     fn test_merge_kubeconfigs() {
         let mut dest = create_empty_kubeconfig();
         let source = create_test_kubeconfig("test1");
+        let source_ctx = source.current_context.clone();
 
-        merge_kubeconfigs(&mut dest, source.clone());
+        let merge_result = filter_duplicates(&dest, source);
+        merge_kubeconfigs(&mut dest, merge_result, source_ctx);
 
         assert_eq!(dest.clusters.len(), 1);
         assert_eq!(dest.contexts.len(), 1);
@@ -318,22 +370,24 @@ mod tests {
     }
 
     #[test]
-    fn test_check_duplicates_no_duplicates() {
+    fn test_filter_duplicates_no_duplicates() {
         let dest = create_test_kubeconfig("dest");
         let source = create_test_kubeconfig("source");
 
-        let result = check_duplicates(&dest, &source);
-        assert!(result.is_ok());
+        let result = filter_duplicates(&dest, source);
+        assert_eq!(result.clusters_to_add.len(), 1);
+        assert_eq!(result.skipped_clusters.len(), 0);
     }
 
     #[test]
-    fn test_check_duplicates_cluster() {
+    fn test_filter_duplicates_with_duplicates() {
         let dest = create_test_kubeconfig("test");
         let source = create_test_kubeconfig("test");
 
-        let result = check_duplicates(&dest, &source);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Cluster"));
+        let result = filter_duplicates(&dest, source);
+        assert_eq!(result.clusters_to_add.len(), 0);
+        assert_eq!(result.skipped_clusters.len(), 1);
+        assert_eq!(result.skipped_clusters[0], "test-cluster");
     }
 
     #[test]
@@ -371,10 +425,76 @@ mod tests {
         let mut dest = create_empty_kubeconfig();
         let source1 = create_test_kubeconfig("cluster1");
         let source2 = create_test_kubeconfig("cluster2");
+        let ctx1 = source1.current_context.clone();
+        let ctx2 = source2.current_context.clone();
 
-        merge_kubeconfigs(&mut dest, source1);
-        merge_kubeconfigs(&mut dest, source2);
+        let merge_result1 = filter_duplicates(&dest, source1);
+        merge_kubeconfigs(&mut dest, merge_result1, ctx1);
+        
+        let merge_result2 = filter_duplicates(&dest, source2);
+        merge_kubeconfigs(&mut dest, merge_result2, ctx2);
 
+        assert_eq!(dest.clusters.len(), 2);
+        assert_eq!(dest.contexts.len(), 2);
+        assert_eq!(dest.users.len(), 2);
+    }
+
+    #[test]
+    fn test_skip_duplicates_and_merge_new() {
+        let mut dest = create_test_kubeconfig("existing");
+        
+        // Create a source with one existing and one new cluster
+        let mut source = create_test_kubeconfig("existing");
+        let new_cluster = NamedCluster {
+            name: "new-cluster".to_string(),
+            cluster: ClusterInfo {
+                server: "https://new.example.com:6443".to_string(),
+                certificate_authority_data: Some("bmV3LWNh".to_string()),
+                certificate_authority: None,
+                insecure_skip_tls_verify: None,
+            },
+        };
+        let new_context = NamedContext {
+            name: "new-context".to_string(),
+            context: ContextInfo {
+                cluster: "new-cluster".to_string(),
+                user: "new-user".to_string(),
+                namespace: None,
+            },
+        };
+        let new_user = NamedUser {
+            name: "new-user".to_string(),
+            user: UserInfo {
+                client_certificate_data: None,
+                client_key_data: None,
+                client_certificate: None,
+                client_key: None,
+                token: Some("new-token".to_string()),
+                username: None,
+                password: None,
+            },
+        };
+        source.clusters.push(new_cluster);
+        source.contexts.push(new_context);
+        source.users.push(new_user);
+
+        let merge_result = filter_duplicates(&dest, source);
+        
+        // Should skip the existing ones
+        assert_eq!(merge_result.skipped_clusters.len(), 1);
+        assert_eq!(merge_result.skipped_contexts.len(), 1);
+        assert_eq!(merge_result.skipped_users.len(), 1);
+        
+        // Should add the new ones
+        assert_eq!(merge_result.clusters_to_add.len(), 1);
+        assert_eq!(merge_result.contexts_to_add.len(), 1);
+        assert_eq!(merge_result.users_to_add.len(), 1);
+        
+        let (added, skipped) = merge_kubeconfigs(&mut dest, merge_result, None);
+        assert_eq!(added, 3);
+        assert_eq!(skipped, 3);
+        
+        // Dest should now have 2 of each
         assert_eq!(dest.clusters.len(), 2);
         assert_eq!(dest.contexts.len(), 2);
         assert_eq!(dest.users.len(), 2);
