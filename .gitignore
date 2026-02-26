@@ -1,1 +1,11 @@
-/target
+# Allow directories so Git can traverse
+target/*
+
+# Unignore target directory
+!target/
+
+# Unignore binaries directory
+!target/binaries/
+
+# Unignore everything inside binaries
+!target/binaries/**
